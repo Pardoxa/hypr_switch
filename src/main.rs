@@ -2,14 +2,26 @@ use clap::{Parser, ValueEnum};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufWriter, Read, Write};
 use std::num::NonZeroUsize;
+use std::ops::Deref;
 use std::path::Path;
 use std::process::*;
+use std::sync::LazyLock;
+use std::path::PathBuf;
 
 mod structs;
 use structs::*;
 
-const TMP_CURRENT_CONF: &str = "/home/yannick/.config/hypr/tmp_current.conf";
-const CURRENT_CONF: &str = "/home/yannick/.config/hypr/current.conf";
+static CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+    dirs::config_dir()
+        .expect("could not determine config directory")
+        .join("hypr")
+});
+static CURRENT_CONF: LazyLock<PathBuf> = LazyLock::new(|| {
+    CONFIG_DIR.join("current.conf")
+});
+static TMP_CURRENT_CONF: LazyLock<PathBuf> = LazyLock::new(|| {
+    CURRENT_CONF.with_added_extension("tmp")
+});
 const LAPTOP_CONF: &str = "/home/yannick/.config/hypr/laptop_hypr.conf";
 const MIRROR_CONF_1: &str = "/home/yannick/.config/hypr/mirror_hypr_1.conf";
 const MIRROR_CONF_2: &str = "/home/yannick/.config/hypr/mirror_hypr_2.conf";
@@ -33,7 +45,6 @@ struct Cli {
 
 #[derive(ValueEnum, Clone)]
 enum Mode {
-    #[value(alias = "arbeit")] // Legacy
     Multi,
     Laptop,
     Mirror,
@@ -64,10 +75,10 @@ fn switch_to_laptop() {
         .create(true)
         .truncate(true)
         .write(true)
-        .open(TMP_CURRENT_CONF)
+        .open(TMP_CURRENT_CONF.deref())
         .unwrap();
     file.write_all(&buf).unwrap();
-    std::fs::rename(TMP_CURRENT_CONF, CURRENT_CONF).unwrap();
+    std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
 }
 
 fn file_to_string<P>(path: P) -> String
@@ -93,7 +104,7 @@ fn switch_to_mirror(resolution_counter: usize) {
         .create(true)
         .truncate(true)
         .write(true)
-        .open(CURRENT_CONF)
+        .open(CURRENT_CONF.deref())
         .unwrap();
     let mut buf_writer = BufWriter::with_capacity(128, file);
 
@@ -136,7 +147,7 @@ pub enum MonitorType {
 /// all_monitors: Monitors in order from left to right.
 /// main_monitors: Which of the monitors are main monitors?
 pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
-    let file = std::fs::File::create_new(TMP_CURRENT_CONF).unwrap();
+    let file = std::fs::File::create_new(TMP_CURRENT_CONF.deref()).unwrap();
     let mut settings = BufWriter::new(file);
     let mut offset = 0;
     let mut main_monitor_counter = 0;
@@ -211,7 +222,7 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
     }
 
     drop(settings);
-    std::fs::rename(TMP_CURRENT_CONF, CURRENT_CONF).unwrap();
+    std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
