@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use std::io::{BufWriter, Read, Write};
 use std::num::NonZeroUsize;
 use std::ops::Deref;
+use std::ops::RangeInclusive;
 use std::path::Path;
 use std::path::PathBuf;
-use std::ops::RangeInclusive;
 use std::sync::LazyLock;
 
 mod config;
@@ -144,7 +144,10 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
     let mut main_monitor_counter = 0;
 
     writeln!(settings, "local monitor_list = {{").unwrap();
-    for (monitor, _) in all_monitors.iter().filter(|(_, monitor_typ)| *monitor_typ == MonitorType::Main) {
+    for (monitor, _) in all_monitors
+        .iter()
+        .filter(|(_, monitor_typ)| *monitor_typ == MonitorType::Main)
+    {
         writeln!(settings, "\t\"{}\",", monitor.name()).unwrap();
         main_monitor_counter += 1;
     }
@@ -166,9 +169,59 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
 
     let ranges = split_range(1..=10, main_monitor_counter as usize);
 
-    for (monitor_idx, range) in ranges.enumerate(){
+    let mut moving_settings = String::new();
+    let mut wallpaper_settings = String::new();
+
+    for (monitor_idx, range) in ranges.enumerate() {
+        {
+            use std::fmt::Write;
+            writeln!(moving_settings, "-- Moving for monitor {monitor_idx}").unwrap();
+
+            writeln!(wallpaper_settings, "-- Wallpaper for monitor {monitor_idx}").unwrap();
+        }
+
+        writeln!(settings, "-- Workspace rules for monitor {monitor_idx}").unwrap();
+
+        let range_len = range.end() - range.start() + 1;
         let mut first = true;
         for workspace_idx in range {
+            //
+            //
+            {
+                let normal_key = workspace_idx % 10;
+                let mut alt_key = workspace_idx % range_len;
+                if alt_key == 0 {
+                    alt_key = range_len;
+                }
+                use std::fmt::Write;
+                writeln!(
+                    moving_settings,
+                    r#"hl.bind(mainMod .. " + {normal_key}", hl.dsp.focus({{ workspace = "{workspace_idx}" }}))"#
+                ).unwrap();
+                writeln!(
+                    moving_settings,
+                    r#"hl.bind(mainMod .. " + SHIFT + {normal_key}", hl.dsp.window.move({{ workspace = "{workspace_idx}" }}))"#
+                ).unwrap();
+                writeln!(
+                    moving_settings,
+                    r#"hl.bind(mainMod .. " + ALT + {alt_key}", hl.dsp.focus({{ workspace = "{workspace_idx}" }}))"#
+                ).unwrap();
+
+                // Wallpaper
+                writeln!(
+                    wallpaper_settings,
+                    r#"hl.bind(mainMod .. " + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{alt_key}] .. "\""))"#
+                ).unwrap();
+                writeln!(
+                    wallpaper_settings,
+                    r#"hl.bind(mainMod .. " + ALT + {alt_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{alt_key}] .. "\""))"#
+                ).unwrap();
+                writeln!(
+                    wallpaper_settings,
+                    r#"hl.bind(mainMod .. " + SHIFT + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{alt_key}] .. "\""))"#
+                ).unwrap();
+            }
+
             writeln!(
                 settings,
                 "hl.workspace_rule({{
@@ -176,44 +229,24 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
     monitor = monitor_list[{monitor_idx}],
     persistent = true,
     default = {first},
-}})").unwrap();
+}})"
+            )
+            .unwrap();
             first = false;
         }
     }
 
-
-    let mut workspace = 1;
-
-    for monitor_id in 0..main_monitor_counter {
-        for i in 1..=5 {
-            let keyboard_key = workspace % 10;
-            writeln!(
-                settings,
-                "bind=$mainMod, {keyboard_key}, exec, hyprctl hyprpaper wallpaper \"$monitor{monitor_id}, $wall{i}\""
-            ).unwrap();
-
-            writeln!(
-                settings,
-                "bind=$mainMod SHIFT, {keyboard_key}, exec, hyprctl hyprpaper wallpaper \"$monitor{monitor_id}, $wall{i}\""
-            ).unwrap();
-
-            writeln!(settings, "bind=$mainMod ALT, {i}, workspace, {workspace}").unwrap();
-
-            writeln!(
-                settings,
-                "bind=$mainMod ALT, {i}, exec, hyprctl hyprpaper wallpaper \"$monitor{monitor_id}, $wall{i}\""
-            )
-            .unwrap();
-
-            workspace += 1;
-        }
-    }
+    writeln!(settings, "{moving_settings}").unwrap();
+    writeln!(settings, "{wallpaper_settings}").unwrap();
 
     drop(settings);
     std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
 }
 
-fn split_range(range: RangeInclusive<usize>, parts: usize) -> impl Iterator<Item = RangeInclusive<usize>> {
+fn split_range(
+    range: RangeInclusive<usize>,
+    parts: usize,
+) -> impl Iterator<Item = RangeInclusive<usize>> {
     let start = *range.start();
     let end = *range.end();
 
@@ -223,22 +256,18 @@ fn split_range(range: RangeInclusive<usize>, parts: usize) -> impl Iterator<Item
 
     let mut current = start;
 
-    (1..=parts)
-        .map(
-            move |index|
-            {
-                let current_size = if index == parts {
-                    size + remainder
-                } else {
-                    size
-                };
+    (1..=parts).map(move |index| {
+        let current_size = if index == parts {
+            size + remainder
+        } else {
+            size
+        };
 
-                let range_end = current + current_size - 1;
-                let range = current..=range_end;
-                current = range_end + 1;
-                range
-            }
-        )
+        let range_end = current + current_size - 1;
+        let range = current..=range_end;
+        current = range_end + 1;
+        range
+    })
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
