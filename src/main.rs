@@ -4,9 +4,9 @@ use std::io::{BufWriter, Read, Write};
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::*;
 use std::sync::LazyLock;
-use std::path::PathBuf;
 
 mod structs;
 use structs::*;
@@ -16,12 +16,9 @@ static CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
         .expect("could not determine config directory")
         .join("hypr")
 });
-static CURRENT_CONF: LazyLock<PathBuf> = LazyLock::new(|| {
-    CONFIG_DIR.join("current.conf")
-});
-static TMP_CURRENT_CONF: LazyLock<PathBuf> = LazyLock::new(|| {
-    CURRENT_CONF.with_added_extension("tmp")
-});
+static CURRENT_CONF: LazyLock<PathBuf> = LazyLock::new(|| CONFIG_DIR.join("current.conf"));
+static TMP_CURRENT_CONF: LazyLock<PathBuf> =
+    LazyLock::new(|| CURRENT_CONF.with_added_extension("tmp"));
 const LAPTOP_CONF: &str = "/home/yannick/.config/hypr/laptop_hypr.conf";
 const MIRROR_CONF_1: &str = "/home/yannick/.config/hypr/mirror_hypr_1.conf";
 const MIRROR_CONF_2: &str = "/home/yannick/.config/hypr/mirror_hypr_2.conf";
@@ -205,11 +202,7 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
                 "bind=$mainMod SHIFT, {keyboard_key}, exec, hyprctl hyprpaper wallpaper \"$monitor{monitor_id}, $wall{i}\""
             ).unwrap();
 
-            writeln!(
-                settings,
-                "bind=$mainMod ALT, {i}, workspace, {workspace}"
-            )
-            .unwrap();
+            writeln!(settings, "bind=$mainMod ALT, {i}, workspace, {workspace}").unwrap();
 
             writeln!(
                 settings,
