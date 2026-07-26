@@ -1,22 +1,23 @@
 use clap::{Parser, ValueEnum};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::io::{BufWriter, Read, Write};
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::path::Path;
 use std::path::PathBuf;
-use std::process::*;
 use std::sync::LazyLock;
 
+mod config;
 mod domain;
+mod parsing;
 use domain::*;
 
-static CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
-    dirs::config_dir()
-        .expect("could not determine config directory")
-        .join("hypr")
-});
-static CURRENT_CONF: LazyLock<PathBuf> = LazyLock::new(|| CONFIG_DIR.join("current.conf"));
+use crate::config::Config;
+
+static CONFIG_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| dirs::config_dir().expect("could not determine config directory"));
+static CURRENT_CONF: LazyLock<PathBuf> =
+    LazyLock::new(|| CONFIG_DIR.join("hypr").join("current.conf"));
 static TMP_CURRENT_CONF: LazyLock<PathBuf> =
     LazyLock::new(|| CURRENT_CONF.with_added_extension("tmp"));
 const LAPTOP_CONF: &str = "/home/yannick/.config/hypr/laptop_hypr.conf";
@@ -50,15 +51,16 @@ enum Mode {
 fn main() {
     let cli = Cli::parse();
     let resolution_counter = cli.aufloesung.map(|r| r.get()).unwrap_or_default();
+    let config = config::Config::parse_from_config_file();
     match cli.mode {
         Mode::Multi => {
-            switch_to_multi(cli.reverse, cli.direction);
+            switch_to_multi(&config, cli.reverse, cli.direction);
         }
         Mode::Laptop => {
             switch_to_laptop();
         }
         Mode::Mirror => {
-            switch_to_mirror(resolution_counter);
+            switch_to_mirror(&config, resolution_counter);
         }
     }
 }
@@ -90,11 +92,11 @@ where
     String::from_utf8(buf).unwrap()
 }
 
-fn switch_to_mirror(resolution_counter: usize) {
+fn switch_to_mirror(config: &Config, resolution_counter: usize) {
     let main_monitor_template = file_to_string(MIRROR_CONF_1);
     let secondary_monitor_template = file_to_string(MIRROR_CONF_2);
 
-    let monitors = parse_monitors(&hyprctl_monitors_all());
+    let monitors = parsing::parse_monitors(&parsing::hyprctl_monitors_all(config));
     let best = best_monitor_mode(&monitors, resolution_counter);
 
     let file = std::fs::OpenOptions::new()
@@ -124,15 +126,6 @@ fn switch_to_mirror(resolution_counter: usize) {
         let to_write = secondary_monitor_template.replace("<<monitor>>", monitor.name());
         writeln!(buf_writer, "{to_write}").unwrap();
     }
-}
-
-fn hyprctl_monitors_all() -> String {
-    let stdout = Command::new("hyprctl")
-        .args(["monitors", "all"])
-        .output()
-        .unwrap()
-        .stdout;
-    String::from_utf8(stdout).unwrap()
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -224,8 +217,13 @@ pub enum Direction {
     Right,
 }
 
-pub fn switch_to_multi(reverse_main_monitor_order: bool, laptop_direction: Direction) {
-    let mut monitors: Vec<_> = parse_monitors(&hyprctl_monitors_all())
+pub fn switch_to_multi(
+    config: &Config,
+    reverse_main_monitor_order: bool,
+    laptop_direction: Direction,
+) {
+    let monitors = parsing::hyprctl_monitors_all(config);
+    let mut monitors: Vec<_> = parsing::parse_monitors(&monitors)
         .into_iter()
         .map(|monitor| {
             let r#type = if monitor.is_laptop() {
@@ -263,59 +261,6 @@ pub fn switch_to_multi(reverse_main_monitor_order: bool, laptop_direction: Direc
 
     // Hier vielleicht ein command ausführen, damit der Laptop ein Wallpaper hat
     // hyprctl hyprpaper wallpaper "eDP-1, /home/yannick/Pictures/wallpaper/1.png"
-}
-
-fn parse_monitors(to_parse: &str) -> Vec<Monitor> {
-    let monitors = to_parse.split("Monitor ").skip(1);
-
-    let monitors: Vec<_> = monitors
-        .map(|monitor| {
-            let (monitor_name, rest) = monitor.split_once(" ").unwrap();
-            let mut vrr = false;
-            let mut modes: BTreeSet<MonitorMode> = BTreeSet::new();
-            let mut speed_map = BTreeMap::new();
-            for line in rest.lines() {
-                let line = line.trim_start();
-                if let Some(vrr_str) = line.strip_prefix("vrr: ") {
-                    vrr = vrr_str.parse().unwrap_or(false);
-                    continue;
-                }
-                if let Some(available_modes) = line.strip_prefix("availableModes: ") {
-                    for mode in available_modes.split_ascii_whitespace() {
-                        let (mode, speed) = monitor_mode_and_speed(mode);
-                        modes.insert(mode);
-
-                        speed_map
-                            .entry(mode)
-                            .or_insert_with(BTreeSet::new)
-                            .insert(speed);
-                    }
-                }
-            }
-            let name = monitor_name.to_owned();
-            Monitor::new(name, vrr, modes, speed_map)
-        })
-        .collect();
-    monitors
-}
-
-fn monitor_mode_and_speed(s: &str) -> (MonitorMode, MonitorSpeed) {
-    let (x, rest) = s.split_once('x').unwrap();
-    let (y, rest) = rest.split_once('@').unwrap();
-
-    let (speed_high, rest) = rest.split_once('.').unwrap();
-    let speed_low = rest.strip_suffix("Hz").unwrap();
-
-    (
-        MonitorMode {
-            x: x.parse().unwrap(),
-            y: y.parse().unwrap(),
-        },
-        MonitorSpeed {
-            speed_high: speed_high.parse().unwrap(),
-            speed_low: speed_low.parse().unwrap(),
-        },
-    )
 }
 
 fn best_monitor_mode(monitors: &[Monitor], nth: usize) -> MonitorMode {
