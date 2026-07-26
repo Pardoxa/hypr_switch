@@ -167,7 +167,7 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
         writeln!(settings, "{monitor_settings}").unwrap();
     }
 
-    let ranges = split_range(1..=10, main_monitor_counter as usize);
+    let (usual_part_size, ranges) = split_range(1..=10, main_monitor_counter);
 
     let mut moving_settings = String::new();
     let mut wallpaper_settings = String::new();
@@ -182,16 +182,23 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
 
         writeln!(settings, "-- Workspace rules for monitor {monitor_idx}").unwrap();
 
-        let range_len = range.end() - range.start() + 1;
         let mut first = true;
+        let mut first_1 = true;
         for workspace_idx in range {
             //
             //
             {
                 let normal_key = workspace_idx % 10;
-                let mut alt_key = workspace_idx % range_len;
+                let mut alt_key = workspace_idx % usual_part_size;
                 if alt_key == 0 {
-                    alt_key = range_len;
+                    alt_key = usual_part_size;
+                }
+                if alt_key == 1 {
+                    if first_1 {
+                        first_1 = false;
+                    } else {
+                        alt_key += usual_part_size;
+                    }
                 }
                 use std::fmt::Write;
                 writeln!(
@@ -246,7 +253,7 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
 fn split_range(
     range: RangeInclusive<usize>,
     parts: usize,
-) -> impl Iterator<Item = RangeInclusive<usize>> {
+) -> (usize, impl Iterator<Item = RangeInclusive<usize>>) {
     let start = *range.start();
     let end = *range.end();
 
@@ -256,18 +263,21 @@ fn split_range(
 
     let mut current = start;
 
-    (1..=parts).map(move |index| {
-        let current_size = if index == parts {
-            size + remainder
-        } else {
-            size
-        };
+    (
+        size,
+        (1..=parts).map(move |index| {
+            let current_size = if index == parts {
+                size + remainder
+            } else {
+                size
+            };
 
-        let range_end = current + current_size - 1;
-        let range = current..=range_end;
-        current = range_end + 1;
-        range
-    })
+            let range_end = current + current_size - 1;
+            let range = current..=range_end;
+            current = range_end + 1;
+            range
+        }),
+    )
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
