@@ -7,9 +7,11 @@ pub struct MonitorSettings {
     mode: String,
     position: String,
     scale: String,
+    #[allow(dead_code)]
     transform: u8,
     bitdepth: Option<u8>,
     mirror: Option<String>,
+    #[allow(dead_code)]
     vrr: bool,
 }
 
@@ -59,20 +61,22 @@ impl MonitorSettings {
 
 impl Display for MonitorSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bitdepth = self
+            .bitdepth
+            .map(|bitdepth| format!(r#"bitdepth = "{}","#, bitdepth))
+            .unwrap_or_default();
+        // TODO: VRR
+        // TODO: Mirror
         writeln!(
             f,
-            "monitorv2 {{\n\toutput = {}\n\tmode = {}\n\tposition = {}\n\tscale = {}\n\ttransform = {}",
-            self.output, self.mode, self.position, self.scale, self.transform
-        )?;
-        if self.vrr {
-            writeln!(f, "\tvrr = 1")?;
-        }
-        if let Some(bit_depth) = self.bitdepth {
-            writeln!(f, "\tbitdepth = {bit_depth}")?;
-        }
-        if let Some(mirror) = self.mirror.as_deref() {
-            writeln!(f, "\tmirror = {mirror}")?;
-        }
-        writeln!(f, "}}")
+            r#"hl.monitor({{
+    output = "{}",
+    mode = "{}",
+    position = "{}",
+    scale = "{}",
+    {}
+}})"#,
+            self.output, self.mode, self.position, self.scale, bitdepth
+        )
     }
 }

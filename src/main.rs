@@ -5,6 +5,7 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::path::Path;
 use std::path::PathBuf;
+use std::ops::RangeInclusive;
 use std::sync::LazyLock;
 
 mod config;
@@ -17,7 +18,7 @@ use crate::config::Config;
 static CONFIG_DIR: LazyLock<PathBuf> =
     LazyLock::new(|| dirs::config_dir().expect("could not determine config directory"));
 static CURRENT_CONF: LazyLock<PathBuf> =
-    LazyLock::new(|| CONFIG_DIR.join("hypr").join("current.conf"));
+    LazyLock::new(|| CONFIG_DIR.join("hypr").join("current_conf.lua"));
 static TMP_CURRENT_CONF: LazyLock<PathBuf> =
     LazyLock::new(|| CURRENT_CONF.with_added_extension("tmp"));
 const LAPTOP_CONF: &str = "/home/yannick/.config/hypr/laptop_hypr.conf";
@@ -141,19 +142,19 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
     let mut settings = BufWriter::new(file);
     let mut offset = 0;
     let mut main_monitor_counter = 0;
+
+    writeln!(settings, "local monitor_list = {{").unwrap();
+    for (monitor, _) in all_monitors.iter().filter(|(_, monitor_typ)| *monitor_typ == MonitorType::Main) {
+        writeln!(settings, "\t\"{}\",", monitor.name()).unwrap();
+        main_monitor_counter += 1;
+    }
+    writeln!(settings, "}}\n").unwrap();
+
     for (monitor, r#type) in all_monitors {
         let mode = monitor.modes().last().unwrap();
         let mut offset_denominator = 1;
         let mut monitor_settings = MonitorSettings::new(monitor, *mode);
-        if *r#type == MonitorType::Main {
-            writeln!(
-                settings,
-                "$monitor{main_monitor_counter}={}",
-                monitor.name()
-            )
-            .unwrap();
-            main_monitor_counter += 1;
-        } else {
+        if *r#type == MonitorType::Sub {
             monitor_settings.set_scale("2".to_owned());
             offset_denominator = 2;
         }
@@ -163,22 +164,23 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
         writeln!(settings, "{monitor_settings}").unwrap();
     }
 
-    // Write workspaces
-    for monitor_id in 0..main_monitor_counter {
-        let workspace_start = 1 + monitor_id * 5;
-        writeln!(
-            settings,
-            "workspace={workspace_start},monitor:$monitor{monitor_id},persistent:true,default:true"
-        )
-        .unwrap();
-        for workspace in workspace_start + 1..workspace_start + 5 {
+    let ranges = split_range(1..=10, main_monitor_counter as usize);
+
+    for (monitor_idx, range) in ranges.enumerate(){
+        let mut first = true;
+        for workspace_idx in range {
             writeln!(
                 settings,
-                "workspace={workspace},monitor:$monitor{monitor_id},persistent:true"
-            )
-            .unwrap();
+                "hl.workspace_rule({{
+    workspace = {workspace_idx},
+    monitor = monitor_list[{monitor_idx}],
+    persistent = true,
+    default = {first},
+}})").unwrap();
+            first = false;
         }
     }
+
 
     let mut workspace = 1;
 
@@ -209,6 +211,34 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
 
     drop(settings);
     std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
+}
+
+fn split_range(range: RangeInclusive<usize>, parts: usize) -> impl Iterator<Item = RangeInclusive<usize>> {
+    let start = *range.start();
+    let end = *range.end();
+
+    let length = end - start + 1;
+    let size = length / parts;
+    let remainder = length % parts;
+
+    let mut current = start;
+
+    (1..=parts)
+        .map(
+            move |index|
+            {
+                let current_size = if index == parts {
+                    size + remainder
+                } else {
+                    size
+                };
+
+                let range_end = current + current_size - 1;
+                let range = current..=range_end;
+                current = range_end + 1;
+                range
+            }
+        )
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
