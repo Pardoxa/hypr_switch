@@ -184,6 +184,7 @@ pub fn write_monitor_configs(all_monitors: &mut [(Monitor, MonitorType)], config
     let mut wallpaper_settings = String::new();
 
     for (monitor_idx, range) in ranges.enumerate() {
+        let lua_monitor_idx = monitor_idx + 1;
         {
             use std::fmt::Write;
             writeln!(moving_settings, "-- Moving for monitor {monitor_idx}").unwrap();
@@ -211,6 +212,7 @@ pub fn write_monitor_configs(all_monitors: &mut [(Monitor, MonitorType)], config
                         alt_key += usual_part_size;
                     }
                 }
+                let alt_key_with_modulo = alt_key % 10;
                 use std::fmt::Write;
                 writeln!(
                     moving_settings,
@@ -222,22 +224,22 @@ pub fn write_monitor_configs(all_monitors: &mut [(Monitor, MonitorType)], config
                 ).unwrap();
                 writeln!(
                     moving_settings,
-                    r#"hl.bind(mainMod .. " + ALT + {alt_key}", hl.dsp.focus({{ workspace = "{workspace_idx}" }}))"#
+                    r#"hl.bind(mainMod .. " + ALT + {alt_key_with_modulo}", hl.dsp.focus({{ workspace = "{workspace_idx}" }}))"#
                 ).unwrap();
 
                 // Wallpaper
                 let wallpaper_idx = ((alt_key - 1) % 5) + 1;
                 writeln!(
                     wallpaper_settings,
-                    r#"hl.bind(mainMod .. " + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
+                    r#"hl.bind(mainMod .. " + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{lua_monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
                 ).unwrap();
                 writeln!(
                     wallpaper_settings,
-                    r#"hl.bind(mainMod .. " + ALT + {alt_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
+                    r#"hl.bind(mainMod .. " + ALT + {alt_key_with_modulo}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{lua_monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
                 ).unwrap();
                 writeln!(
                     wallpaper_settings,
-                    r#"hl.bind(mainMod .. " + SHIFT + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
+                    r#"hl.bind(mainMod .. " + SHIFT + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{lua_monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
                 ).unwrap();
             }
 
@@ -245,7 +247,7 @@ pub fn write_monitor_configs(all_monitors: &mut [(Monitor, MonitorType)], config
                 settings,
                 "hl.workspace_rule({{
     workspace = {workspace_idx},
-    monitor = monitor_list[{monitor_idx}],
+    monitor = monitor_list[{lua_monitor_idx}],
     persistent = true,
     default = {first},
 }})"

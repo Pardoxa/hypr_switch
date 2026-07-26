@@ -63,7 +63,7 @@ impl Display for MonitorSettings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bitdepth = self
             .bitdepth
-            .map(|bitdepth| format!(r#"bitdepth = "{}","#, bitdepth))
+            .map(|bitdepth| format!(r#"bitdepth = {},"#, bitdepth))
             .unwrap_or_default();
         // TODO: VRR
         // TODO: Mirror
