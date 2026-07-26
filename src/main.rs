@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use std::process::*;
 use std::sync::LazyLock;
 
-mod structs;
-use structs::*;
+mod domain;
+use domain::*;
 
 static CONFIG_DIR: LazyLock<PathBuf> = LazyLock::new(|| {
     dirs::config_dir()
