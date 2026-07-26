@@ -137,7 +137,18 @@ pub enum MonitorType {
 
 /// all_monitors: Monitors in order from left to right.
 /// main_monitors: Which of the monitors are main monitors?
-pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
+pub fn write_monitor_configs(all_monitors: &mut [(Monitor, MonitorType)], config: &Config) {
+    if config.ignore_monitor_type {
+        all_monitors
+            .iter_mut()
+            .for_each(|(_, monitor_type)| *monitor_type = MonitorType::Main);
+    }
+
+    // Wenn wir nur einen Monitor haben, dann ist der main :)
+    // Auch wenn ich hier gegen Programmierprinzipien verstoße mit dem mut, mir egal :D
+    if all_monitors.len() == 1 {
+        all_monitors[0].1 = MonitorType::Main;
+    }
     let file = std::fs::File::create_new(TMP_CURRENT_CONF.deref()).unwrap();
     let mut settings = BufWriter::new(file);
     let mut offset = 0;
@@ -215,17 +226,18 @@ pub fn write_monitor_configs(all_monitors: &[(Monitor, MonitorType)]) {
                 ).unwrap();
 
                 // Wallpaper
+                let wallpaper_idx = ((alt_key - 1) % 5) + 1;
                 writeln!(
                     wallpaper_settings,
-                    r#"hl.bind(mainMod .. " + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{alt_key}] .. "\""))"#
+                    r#"hl.bind(mainMod .. " + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
                 ).unwrap();
                 writeln!(
                     wallpaper_settings,
-                    r#"hl.bind(mainMod .. " + ALT + {alt_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{alt_key}] .. "\""))"#
+                    r#"hl.bind(mainMod .. " + ALT + {alt_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
                 ).unwrap();
                 writeln!(
                     wallpaper_settings,
-                    r#"hl.bind(mainMod .. " + SHIFT + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{alt_key}] .. "\""))"#
+                    r#"hl.bind(mainMod .. " + SHIFT + {normal_key}", hl.dsp.exec_cmd("hyprctl hyprpaper wallpaper \"" .. monitor_list[{monitor_idx}] .. ", " .. wallpaper[{wallpaper_idx}] .. "\""))"#
                 ).unwrap();
             }
 
@@ -326,7 +338,7 @@ pub fn switch_to_multi(
         }
     }
 
-    write_monitor_configs(&monitors);
+    write_monitor_configs(&mut monitors, &config);
 
     // Hier vielleicht ein command ausführen, damit der Laptop ein Wallpaper hat
     // hyprctl hyprpaper wallpaper "eDP-1, /home/yannick/Pictures/wallpaper/1.png"

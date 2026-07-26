@@ -7,6 +7,7 @@ use crate::CONFIG_DIR;
 #[derive(Serialize, Deserialize, Debug, Clone, Hash, Default)]
 pub struct Config {
     pub monitors_all_replacement: Option<String>,
+    pub ignore_monitor_type: bool,
 }
 
 impl Config {
