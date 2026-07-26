@@ -1,3 +1,5 @@
+use std::io::{Read, Write};
+
 use serde::{Deserialize, Serialize};
 
 use crate::CONFIG_DIR;
@@ -9,15 +11,29 @@ pub struct Config {
 
 impl Config {
     pub fn parse_from_config_file() -> Self {
-        let path = CONFIG_DIR.join("hypr_switch").join("config");
+        let path = CONFIG_DIR.join("hypr_switch").join("config.toml");
 
-        if let Ok(file) = std::fs::OpenOptions::new().read(true).open(&path) {
-            return match serde_json::from_reader(file) {
-                Ok(config) => config,
-                Err(err) => {
-                    panic!("Error while parsing config file: {path:?} - {err:?}")
-                }
-            };
+        match std::fs::OpenOptions::new().read(true).open(&path) {
+            Ok(mut file) => {
+                let mut buf = String::new();
+                let content = match file.read_to_string(&mut buf)
+                {
+                    Ok(_) => buf,
+                    Err(err) => {
+                        panic!("Cannot read content of {path:?} due to {err:?}")
+                    }
+                };
+
+                return match toml::from_str(&content) {
+                    Ok(config) => config,
+                    Err(err) => {
+                        panic!("Error while parsing config file: {path:?} - {err:?}")
+                    }
+                };
+            },
+            Err(err) => {
+                println!("INFO: Could not read file: {err:?}, fallback to default config. Writing default config to file.");
+            }
         }
 
         let default_config = Config::default();
@@ -26,10 +42,12 @@ impl Config {
         std::fs::create_dir_all(path.parent().unwrap()).expect("Could not create config directory");
 
         // Create and write the default config
-        let file = std::fs::File::create(&path).expect("Could not create config file");
+        let mut file = std::fs::File::create(&path).expect("Could not create config file");
 
-        serde_json::to_writer_pretty(file, &default_config)
-            .expect("Could not write default config");
+        let toml_string = toml::to_string_pretty(&default_config)
+            .expect("Could not create default config");
+        file.write_all(toml_string.as_bytes()).expect("Should be able to write to file");
+
 
         default_config
     }
