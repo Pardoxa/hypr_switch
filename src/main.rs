@@ -375,7 +375,7 @@ fn best_monitor_mode(monitors: &[Monitor], nth: usize) -> MonitorMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::parsing::parse_monitors;
     #[test]
     fn example_monitors() {
         let monitor_str = "Monitor eDP-1 (ID 0):
