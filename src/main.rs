@@ -4,12 +4,12 @@ use std::io::{BufWriter, Read, Write};
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::ops::RangeInclusive;
-use std::path::Path;
 use std::path::PathBuf;
 use std::sync::LazyLock;
 
 mod config;
 mod domain;
+mod order;
 mod parsing;
 use domain::*;
 
@@ -22,8 +22,6 @@ static CURRENT_CONF: LazyLock<PathBuf> =
 static TMP_CURRENT_CONF: LazyLock<PathBuf> =
     LazyLock::new(|| CURRENT_CONF.with_added_extension("tmp"));
 const LAPTOP_CONF: &str = "/home/yannick/.config/hypr/laptop_hypr.conf";
-const MIRROR_CONF_1: &str = "/home/yannick/.config/hypr/mirror_hypr_1.conf";
-const MIRROR_CONF_2: &str = "/home/yannick/.config/hypr/mirror_hypr_2.conf";
 
 /// Simple CLI to choose between "arbeit" or "laptop"
 #[derive(Parser)]
@@ -45,6 +43,10 @@ struct Cli {
 #[derive(ValueEnum, Clone)]
 enum Mode {
     Multi,
+    /// Wie multi, aber schaltet die externen Monitore eine Anordnung weiter
+    Next,
+    /// Wie multi, aber schaltet die externen Monitore eine Anordnung zurück
+    Prev,
     Laptop,
     Mirror,
 }
@@ -55,7 +57,13 @@ fn main() {
     let config = config::Config::parse_from_config_file();
     match cli.mode {
         Mode::Multi => {
-            switch_to_multi(&config, cli.reverse, cli.direction);
+            switch_to_multi(&config, cli.reverse, cli.direction, 0);
+        }
+        Mode::Next => {
+            switch_to_multi(&config, cli.reverse, cli.direction, 1);
+        }
+        Mode::Prev => {
+            switch_to_multi(&config, cli.reverse, cli.direction, -1);
         }
         Mode::Laptop => {
             switch_to_laptop();
@@ -81,52 +89,37 @@ fn switch_to_laptop() {
     std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
 }
 
-fn file_to_string<P>(path: P) -> String
-where
-    P: AsRef<Path>,
-{
-    let path = std::fs::read_link(path).unwrap();
-    let mut reader = std::fs::File::open(path).unwrap();
-    let mut buf = Vec::new();
-    let _success = reader.read_to_end(&mut buf).unwrap();
-
-    String::from_utf8(buf).unwrap()
-}
-
+/// Alle Monitore zeigen exakt das gleiche Bild: gleiche Auflösung (die beste,
+/// die alle gemeinsam können), Skalierung 1, und alle spiegeln den Laptop
+/// (bzw. den ersten Monitor, falls kein Laptop-Bildschirm da ist).
 fn switch_to_mirror(config: &Config, resolution_counter: usize) {
-    let main_monitor_template = file_to_string(MIRROR_CONF_1);
-    let secondary_monitor_template = file_to_string(MIRROR_CONF_2);
-
     let monitors = parsing::parse_monitors(&parsing::hyprctl_monitors_all(config));
     let best = best_monitor_mode(&monitors, resolution_counter);
 
-    let file = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(CURRENT_CONF.deref())
-        .unwrap();
-    let mut buf_writer = BufWriter::with_capacity(128, file);
-
     let main_monitor = monitors
         .iter()
-        .find(|m| m.name() == "eDP-1")
+        .find(|m| m.is_laptop())
         .unwrap_or(&monitors[0]);
 
-    let main_monitor_writing =
-        main_monitor_template.replace("<<monitor_main>>", main_monitor.name());
-    writeln!(buf_writer, "{main_monitor_writing}").unwrap();
+    let file = std::fs::File::create(TMP_CURRENT_CONF.deref()).unwrap();
+    let mut settings = BufWriter::new(file);
+
+    writeln!(settings, "local monitor_list = {{").unwrap();
+    writeln!(settings, "\t\"{}\",", main_monitor.name()).unwrap();
+    writeln!(settings, "}}\n").unwrap();
 
     for monitor in monitors.iter() {
-        // TODO: Add monitor stuff
         let mut monitor_settings = MonitorSettings::new(monitor, best);
         if monitor.name() != main_monitor.name() {
             monitor_settings.mirror(main_monitor);
         }
-        write!(buf_writer, "{monitor_settings}").unwrap();
-        let to_write = secondary_monitor_template.replace("<<monitor>>", monitor.name());
-        writeln!(buf_writer, "{to_write}").unwrap();
+        writeln!(settings, "{monitor_settings}").unwrap();
     }
+
+    write_workspace_rules(&mut settings, 1);
+
+    drop(settings);
+    std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -178,6 +171,15 @@ pub fn write_monitor_configs(all_monitors: &mut [(Monitor, MonitorType)], config
         writeln!(settings, "{monitor_settings}").unwrap();
     }
 
+    write_workspace_rules(&mut settings, main_monitor_counter);
+
+    drop(settings);
+    std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
+}
+
+/// Workspace-Regeln, Keybinds und Wallpaper-Binds für die ersten
+/// `main_monitor_counter` Einträge aus `monitor_list`
+fn write_workspace_rules(settings: &mut impl Write, main_monitor_counter: usize) {
     let (usual_part_size, ranges) = split_range(1..=10, main_monitor_counter);
 
     let mut moving_settings = String::new();
@@ -259,9 +261,6 @@ pub fn write_monitor_configs(all_monitors: &mut [(Monitor, MonitorType)], config
 
     writeln!(settings, "{moving_settings}").unwrap();
     writeln!(settings, "{wallpaper_settings}").unwrap();
-
-    drop(settings);
-    std::fs::rename(TMP_CURRENT_CONF.deref(), CURRENT_CONF.deref()).unwrap();
 }
 
 fn split_range(
@@ -304,6 +303,7 @@ pub fn switch_to_multi(
     config: &Config,
     reverse_main_monitor_order: bool,
     laptop_direction: Direction,
+    order_step: isize,
 ) {
     let monitors = parsing::hyprctl_monitors_all(config);
     let mut monitors: Vec<_> = parsing::parse_monitors(&monitors)
@@ -326,6 +326,12 @@ pub fn switch_to_multi(
         .position(|(_, r#type)| *r#type == MonitorType::Sub)
         .unwrap();
     let laptop = monitors.remove(laptop_index);
+
+    let externals = monitors.into_iter().map(|(monitor, _)| monitor).collect();
+    let mut monitors: Vec<_> = order::apply_stored_order(externals, order_step)
+        .into_iter()
+        .map(|monitor| (monitor, MonitorType::Main))
+        .collect();
 
     if reverse_main_monitor_order {
         monitors.reverse();

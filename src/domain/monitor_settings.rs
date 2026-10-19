@@ -65,8 +65,12 @@ impl Display for MonitorSettings {
             .bitdepth
             .map(|bitdepth| format!(r#"bitdepth = {},"#, bitdepth))
             .unwrap_or_default();
+        let mirror = self
+            .mirror
+            .as_ref()
+            .map(|mirror| format!(r#"mirror = "{}","#, mirror))
+            .unwrap_or_default();
         // TODO: VRR
-        // TODO: Mirror
         writeln!(
             f,
             r#"hl.monitor({{
@@ -75,8 +79,9 @@ impl Display for MonitorSettings {
     position = "{}",
     scale = "{}",
     {}
+    {}
 }})"#,
-            self.output, self.mode, self.position, self.scale, bitdepth
+            self.output, self.mode, self.position, self.scale, bitdepth, mirror
         )
     }
 }
